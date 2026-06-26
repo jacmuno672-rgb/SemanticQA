@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中文语义相似度问答系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>中文语义相似度问答系统</h1>
+            <p>基于 Word2Vec 词向量的智能问答</p>
+        </header>
+
+        <div class="chat-container">
+            <div class="chat-messages" id="chatMessages">
+                <div class="message system">
+                    <div class="message-content">
+                        欢迎使用问答系统！在下方输入你的问题，系统会通过语义相似度匹配最佳答案。
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input">
+                <input
+                    type="text"
+                    id="questionInput"
+                    placeholder="输入你的问题..."
+                    autocomplete="off"
+                >
+                <button id="sendBtn">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const messagesDiv = document.getElementById("chatMessages");
+        const input = document.getElementById("questionInput");
+        const sendBtn = document.getElementById("sendBtn");
+
+        function addMessage(text, type, details) {
+            const div = document.createElement("div");
+            div.className = "message " + type;
+
+            const content = document.createElement("div");
+            content.className = "message-content";
+
+            if (type === "user") {
+                content.textContent = text;
+            } else if (type === "bot") {
+                let html = '<div class="answer">' + escapeHtml(text) + '</div>';
+                if (details) {
+                    html += '<div class="meta">匹配: ' + escapeHtml(details.question.substring(0, 40)) +
+                            ' (相似度: ' + details.score.toFixed(3) + ')</div>';
+                }
+                content.innerHTML = html;
+            } else {
+                content.textContent = text;
+            }
+
+            div.appendChild(content);
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function addLoading() {
+            const div = document.createElement("div");
+            div.className = "message bot";
+            div.id = "loadingMsg";
+            const content = document.createElement("div");
+            content.className = "message-content loading";
+            content.textContent = "正在思考...";
+            div.appendChild(content);
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function removeLoading() {
+            const el = document.getElementById("loadingMsg");
+            if (el) el.remove();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement("div");
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function sendQuestion() {
+            const question = input.value.trim();
+            if (!question) return;
+
+            addMessage(question, "user");
+            input.value = "";
+            input.disabled = true;
+            sendBtn.disabled = true;
+            addLoading();
+
+            try {
+                const resp = await fetch("/ask", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ question: question, top_k: 3 })
+                });
+                const data = await resp.json();
+
+                removeLoading();
+
+                if (data.error) {
+                    addMessage(data.error, "system");
+                } else if (data.results && data.results.length > 0) {
+                    const best = data.results[0];
+                    addMessage(best.answer, "bot", best);
+
+                    if (data.results.length > 1) {
+                        let altHtml = '<div class="alternatives">相似问题：';
+                        data.results.slice(1).forEach((r, i) => {
+                            altHtml += '<span class="alt-item">' +
+                                escapeHtml(r.question.substring(0, 30)) +
+                                ' (' + r.score.toFixed(2) + ')</span>';
+                        });
+                        altHtml += '</div>';
+                        const div = document.createElement("div");
+                        div.className = "message bot";
+                        div.innerHTML = '<div class="message-content">' + altHtml + '</div>';
+                        messagesDiv.appendChild(div);
+                    }
+                } else {
+                    addMessage("抱歉，没有找到匹配的答案。", "system");
+                }
+            } catch (e) {
+                removeLoading();
+                addMessage("请求失败，请检查服务是否正常运行。", "system");
+            }
+
+            input.disabled = false;
+            sendBtn.disabled = false;
+            input.focus();
+        }
+
+        sendBtn.addEventListener("click", sendQuestion);
+        input.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") sendQuestion();
+        });
+    </script>
+</body>
+</html>
